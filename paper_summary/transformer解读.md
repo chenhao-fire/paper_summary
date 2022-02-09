@@ -22,7 +22,7 @@
 
 在语言和图像中，模型需要重点关注的部分就是注意力机制。通过attention的机制将上下文的信息融合起来得到融合上下文的特征，如一个句话的特征。
 
-![image-20220209201101124](E:\1_paper\paper_summary\document\images\image-20220209201101124.png)
+![image-20220209201101124](..\document\images\image-20220209201101124.png)
 
 
 
