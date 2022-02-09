@@ -25,3 +25,11 @@ git 使用方式
 两种都能达到目的，但1方法更通用。如果远程库中没有mybranch1分支，则2方法不行。
 
 总结：git push -u origin mybranch1 相当于 git push origin mybranch1 + git branch --set-upsteam-to=origin/mybranch1 mybranch1
+
+4、git remote add origin git@github.com:chenhao-fire/paper_summary.git
+
+添加远程分支
+
+5、git pull origin main --allow-unrelated-hisitories
+
+强制合并，解决不相关历史提交问题；
