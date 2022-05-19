@@ -1,238 +1,306 @@
-## 三维重建算法
+##  transformer解读
 
-##### 一、colmap
+#### 一、transformer 发展历程
 
-​		传统三维重建算法，目前性能的sota，但是速度比较慢，连续帧摄像头位姿估计等耗时不大，主要的时间是消耗在稠密点云构建和mesh生成上。
+2017.6  Transformer   solely based on attention mechanism, the transformer is proposed and shows great performance on NLP tasks
 
+2018.10 BERT Pre-training transformer models begin to be dominated in the field of NLP;
 
+2020.5 GPT-3 A huge transformer with 170B parameters, takes a big step towards general NLP model.
 
-##### 二、NeuralRecon
+2020.5 DERT A simple yet effective framework for high-level vision by viewing object detection as a direct set prediction problem.
 
-​		论文《NeuralRecon: Real-Time Coherent 3D Reconstruction from Monocular Video，2021，Jiaming Sun》跟之前的方法不太一致，以前方法是分别计算关键帧的深度图，之后再融合，本文是通过一个网络直接重建以稀疏TSDF卷表示的3D表面。这里利用一个基于学习的门控循环单元(gated recurrent units)TSDF融合模块来引导模型融合视频，这一设计可以让网络获取局部的平滑信息和全局的形状信息来构建连续的3D表面，最终实现准确的、连续的、实时的表面重构。实验在ScanNet和7-Scens数据库上得到sota的效果。
+2020.7 iGPT The transformer model for NLP can aslo be used for image pre-training.
 
-![image-20220301151708358](../document/images/image-20220301151708358.png)
+2020.10 ViT Pure transformer architectures work well for visual recognition.
 
-​		对于单关键帧进行深度图估计之后进行多帧间一致性和时序连续性融合过滤得到截断符号距离函数卷(truncated signed distance function (TSDF) volume)。这有两个问题，一个是重复计算；第二个是每个关键帧是单独计算的，即使每帧之间的位姿绝对准确，但单帧深度图估计存在比例因子(scale-factor)的变化，会导致建成的图会存在分层和发散的问题。
+2020.12 IPT The first transformer model for low-level vision by combining multi-tasks.
 
-​		而本文中的方法是直接在TSDF特征空间内进行联合重建和3D几何融合，即NeuralRecon是在视角独立的3D空间内进行局部结合重建，而不是在视角依赖的深度地图中进行。具体的说，就是该网络将图像特征反投影成三维特征体，之后利用稀疏卷积对特征体进行处理输出一个稀疏的TSDF体。通过由粗到精的设计，TSDF体也在不同层级逐步精细化。通过直接重构隐式TSDF表面，网络能够学习到局部平滑和全局形状信息。与基于关键帧深度估计方法不同，在NeuralRecon网络中局部片段的连续几何特征会被学习，为了使当前片段重构和全局重构具有一致性，一个使用门控循环单元(Gate Recurrent Unit GRU)的基于学习的TSDF融合模块被提出。
+#### 二、transformer介绍
 
-###### 1、**相关的工作有以下：**
+##### 1、self-attention介绍
 
-(1) 多视图深度估计
+​		在语言和图像中，模型需要重点关注的部分就是注意力机制。通过attention的机制将上下文的信息融合起来得到融合上下文的特征，如一个句话，对于你这个词从原只有蓝色的特征融合了整个句子中所有的词后得到的特征，而融合过程中采用不同的权重进行融合。
 
-​		在深度学习之前，基于图像一致性、深度过滤、平面立体扫描等得到比较好的三维重建结果。
+![image-20220209203153964](../document/images/image-20220209203153964.png)
 
-​		MVDepthNet 、CNMNet、Neural RGB- >D利用2D卷积来处理2D深度图代价体，这种可以减轻对图像一致性的依赖并实时得到多视图深度估计。
+​		那么如何进行上下文的信息融合呢，也就是上文中的特征、权重都是如何产生的呢？具体如下：
 
-​		对于高分辨图像，PatchMatch的方法得到非常好的精度效果，当前依然比较流行。而基于学习的方法再解决MVS(mutli-view stereo)问题中在精度方面得到和最好性能，但是限于GPU的内存，只能处理中等分辨率的图像。
+<img src="../document/images/image-20220210080959165.png" alt="image-20220210080959165"  />
 
-​		对于非实时的方法，采用3D卷积网络处理3D代价体，类似MVSNet，还有一些从粗到精的网络。类似于基于学习的SLAM系统。参见本文中引用[45, 57, 42, 44]。
+​		这里首先在原始特征向量x1、x2的基础上生成三个对应向量q、k、v，其中q和k用于计算权重值，而v相当于对原始特征向量的转化，对于每一项，首先通过q与其他所有项的k进行相乘得到权重，之后乘以对应v相加得到最终融合全局信息的特征向量。
 
-​		**上面这些方法都是采用单视图深度图作为中间表示。**
+​		在实际应用中是需要训练q、k、v对应的权重矩阵Wq、Wk、Wv，之后将原始特征与对应的权重矩阵相乘得到q、k、v，具体如下：
 
-​		SurfaceNet提出一种不同的方法，是用统一体度量(volumetric)来表示体积占用。最近，一个离线方法，atlas采用一个解码模块来预测TSDF体。与本文相关的还有使用递归网络处理多视图特征融合[5,18]。
+![image-20220210083512618](../document/images/image-20220210083512618.png)
 
-(2) 3D表面重构
+​		transformer主要的作用是将全局上下文的特征进行关系的计算，之后根据关系的契合程度进行特征的融合。特征关系契合程度的计算是通过查询向量q与每一个关键向量k的乘积得到的，可以简单理解为两个向量的内积，契合程度越高或者说该特征对当前特征影响越大，得到内积(权重)越大。具体如下：
 
-​		有了深度图估计并转为点云之后，接下来的3D重建工作是估计3D表面位置以及重建mesh。在离线的MVS处理流程中，泊松重构(poisson)和Delaunay三角化是常用的方法。而KinectFusion中，采用增量的体度量TSDF融合由于简单和并行话得到广泛应用。
+![image-20220210084257480](../document/images/image-20220210084257480.png)
 
-(3) 神经网络隐式表达
+​		这里计算第一个特征向量与另外两个特征向量的权重，可以看到第一个特征向量与本特征向量的契合程度更大，所以得到的权重越大。
 
-​		最近，神经网络隐式表达得到重要发展[29, 33, 36, 17, 54, 25]。本文也是通过预测SDF来学习神经网络隐式表达来编码图像特征。类似PIFu[36]。主要的不同是我们使用稀疏3D卷积来预测离散TSDF体，而不是使用MLP网络。
+​		下面假设有4个特征向量的输入，那么对于第一个特征向量的q1通过与k1、k2、k3、k4相乘得到权重，权重值可以通过归一化的操作后再与value1、value2、value3、value4相乘，之后相加得到特征1的最新表示。如V1=0.4value1+0.1value2+0.3value3+0.2value4：
 
-###### 2、**本文架构：**
+![image-20220210084658204](../document/images/image-20220210084658204.png)
 
-​		本文框架是在给定一组图像It和摄像头位置轨迹的情况下实时准确的重建3D几何场景，这里的摄像头位姿轨迹是通过SLAM系统提供的。最终希望实时重建出Stg，这里的t表示当前时刻，整个框架如图。
+​		那么整个Attention的计算流程如下：
 
-![image-20220301182148857](../document/images/image-20220301182148857.png)
+(1) 每个词的Q会跟每个K计算权重得分；
 
-(1)关键帧选择
+(2)Softmax后就得到整个加权结果；
 
-​		对于适合交互应用的实时3D重构算法，需要处理连续片段进行重构。这里选择了一些关键帧作为网络输入，为了有足够的运动距离同时要保持重构的多视图间有共视区，选择的关键帧既不能太远也不能太近。这里选择关键帧采用[13]准则，当平移大于tmax同时转动角度大于Rmax。一个有N个关键帧组成的连续帧称作局部片段(local fragment)。关键帧选出后，需要以固定最大距离来计算包含所有关键帧对应视野的立体片段包围体(fragment bounding volume FBV)，在每个片段的重构过程中值考虑FBV中的区域。
+(3)通过加权特征之后，每个词看到的将会是整个输入序列；
 
-(2)视频片段联合重构与融合
+(4)之后按照前面的方式计算所有的特征；
 
-​		本文中主要提出了同时重构局部视频片段(local fragment)Stl为TSDF体并与全局TSDF体Stg进行融合的深度学习方法。联合重构和融合时在局部坐标系下进行实现的，对于局部坐标系和FBV所对应的全局坐标系可以参看附属资料中的Fig.1.
+​		该方法相当于对于每一个特征向量都进行了重构，重构的方式是融合了整个句子所有的特征。该思想是2017年Attention is all your need论文中的内容。开始了transformer的时代。
 
-​		**图像特征体构建：**
+![image-20220210085540087](../document/images/image-20220210085540087.png)
 
-​		在局部视频片段的N张图像首先输入到图像backbone来提取多层级特征。类似之前体度量重构的工作[18,15,30]，这些提取的特征沿着每个射线反投影到3D特征体重。图像特征体Ftl通过多视图的特征根据每个体素可视权重平均得到。对于可视化权重表示在这个局部片段中，有多少个视角能够看到这个体素。反投影过程的可视化如下图i所示。
+​		需要注意的一点，这里除以了8就是为了将权重值减小一些，按照64开根号进行除，防止做归一化的过程中计算e的次幂时比较大。
 
-![image-20220301184642513](../document/images/image-20220301184642513.png)
+##### 2、Transformer介绍		
 
-​		**粗到精的TSDF重构**：
+​		Transformer主要是一个backbone，能够更好的提取了特征。根据前面transformer的发展，ViT是将transformer引入到了CV中。
 
-​		 我们采用由粗到精的方法来逐渐精细化TSDF体。这里使用稀疏3D卷积来处理特征体Ftl。这个稀疏的体度量特征自然是由粗到精的设计。特别的，每个TSDF体(Stl)中的体素包含两个值，占据值o和SDF值x。在每一层，o和x是有MLP预测的。占据值表示这个体素在TSDF阶段距离lemda内的置信度。如果体素占据值低于稀疏性阈值theta则定义为空并将被稀疏化。这个稀疏的TSDF体可视化表示如上图中的iii。经过稀疏话后，Stl上采样2倍并与Ftl+1进行连接，并作为下一个层级GRU融合模块的输入。
+​		Transformer使用在CV中需要解决几个问题：
 
-​		取代关键帧单视图深度图估计，NeuralRecon一起联合重构了再局部视频片段中的所有物体表面。这个设计将引导网络直接从训练数据中学习表面。结果，重构的表面是局部平滑并在尺度上一致的。同时这个设计也减少的冗余的计算，因为每个区域在片段内只重构了一次。
+​		(1) 之前transformer是用在语言领域，那么每个词的特征向量是固定的，同时有多个特征向量。而图像只有一张图；所以解决方式是将图片分成N*M个patches，每个patch相当于一个特征向量；
 
-​		**GRU 融合：**         
+​		(2)接下来对每个patch拉成一个向量，之后可以通过全连接的方式对特征进行重构，即Linear Projection of Flattened Patches解决的。
 
-​		为了使片段间重构一致，我们提出基于历史重构进行当前片段重构的方案。我们使用了一个门控递归单元3D卷积变体模块[6]来实现。如上图中的ii，每个层级的图像特征体Ftl首先通过3D稀疏卷积来提取几何体征Gtl。而局部的隐式状态H(t-1)l是从全局隐式状态H(t-1)g中提取的，提取的区域是片段包围体。GRU融合Gtl和隐式状态H(t-l)l并得到新的局部隐式状态Htl，这个将通过MLP层来预测TSDF体Stl。此时，局部隐式状态Htl将用于更新全局隐式状态Htg，更新方式是通过替换相应体素的方式。正式的，用zt表示更新门，rt表示重置门，mu表示sigmoid函数，W*表示稀疏卷积，GRU融合过程如下式：
+​		(3)目前对于多个patches按照不同的顺序进行 encoder实际上一样的，所以需要通过position Embedding的方式将位置信息加入进来。编码方式可以通过1,2,3,4...方式进行编码还是通过(1,1)（1,2）...这种二维编码实现，通过实验验证两者是差别不大的。
 
-![image-20220301200406313](../document/images/image-20220301200406313.png)
+![image-20220210124625306](../document/images/image-20220210124625306.png)
 
-​		本质的，根据TSDF联合重构和融合的上下文，GRU中的更新门zt和忘记门rt用于决定采用隐式状态H(t-1)l中的多少信息与当前片段几何特征Gtl融合以及当前片段中的多少信息被融合进隐式状态Htl。作为数据驱动的方法，GRU看作是一种选择注意力机制来代替TSDF融合中卷积实现的线性平均操作[31]。通过GRU模块预测得到Stl，之后经过MLP网络利用历史片段积累上下文信息来是的局部片段的表面几何连续。这在概念上类似传统方法中的深度过滤，这些方法采用当前观察与一段时间融合的深度进行bayesian 过滤融合[38,34]。
+​		Transformer也存在一定问题，就是训练需要的数据量和计算资源比较大。
 
-​		**集成到全局TSDF体：**
+##### 3、Multi-headed机制
 
-​		最后一级的粗到精层级，St3用于预测局部稀疏TDSF体Stl。因为Stl和Stg之间的融合已经在GRU中被融合了，Stl可以通过直接替换相应体素来集成到全局TSDF Stg中。在每个时间t，Marching Cubes用于在Stg上执行mesh重构。
+​		前面介绍了采用一组q,k,v的权重计算出新的特征，实际上可以通过多组q,k,v的权重来计算出多个特征，之后将这些特征concatenate一起后经过一个全连接方式得到融合多种注意力下的新特征，即称为多头机制，具体如下所示：
 
-(3) 实现细节
+![image-20220210154505168](../document/images/image-20220210154505168.png)
 
-​		我们用torchsparse[43]作为3D稀疏卷积的实现，图像的backbone是使用的MnasNet[41]的变体并用ImageNet预训练权重。FPN用于提取多层级特征。这里占据值o采用sigmoid层计算。最后一层的voxel的大小为4cm，而TSDF阶段阶段lembda设置为12cm。dmax设置为3m，Rmax和tmax设置为15度和0.1m。theta设置为0.5。最近邻插值用于从粗到精层级的上采样。
+​		这里对于一个特征向量X通过attention方式生成8个特征分别为Z0-Z8，随后进行连接并通过全连接层得到最终的新特征Z。
 
-**性能比较如下：**
+##### 4、ViT介绍
 
-![image-20220301212721256](../document/images/image-20220301212721256.png)
+​		对于ViT的工作前面简单介绍了一下，这里在详细介绍一下各步骤的操作：
 
+​		(1) 将图像平均分成多分，如N*M份，则每一份的维度为a * b * 3，对这个维度的patch进行卷积操作得到如256维向量，即实现将patch特征拉成一维；
 
+​		(2)通过下图粉色区域的Linear Projection of Flattened Patches，将256维向量通过全连接的方式扩展成1024维向量；
 
-##### 三、人体的mesh重构
+​		(3) 对得到的特征向量进行位置编码，这里采用1,2,3...9的方式进行编码。由于ViT是进行分类任务，所以这里增加了0位置的编码，用于增加类别的信息，之后再transformer Encoder的过程中，0位置的特征向量会融合全局上下文特征，最后用第0位置的特征向量进行全连接MLP即可得到1000类别分类；
 
-​		论文《End-to-End Human Pose and Mesh Reconstruction with Transformers，2021，Kevin Lin》利用人体表面mesh表示相对成熟的方案SMPL，其中SMPL提供的人体关节、人体表面等信息作为query项输入到Transformers中，通过transformer的迭代最后得出人体的SMPL表示。最终效果比较好同时也能解决一定单帧图像遮挡情况下还能有一定
+![image-20220210124625306](../document/images/image-20220210124625306.png)
 
-![image-20220303172754883](../document/images/image-20220303172754883.png)
+##### 5、DETR介绍
 
-![image-20220303174614128](../document/images/image-20220303174614128.png)
+​		前面介绍的transformer主要是做了Encoder的工作，是将图像特征提取的更好，但无法做检测等任务功能，而DETR是在此基础上增加了目标检测的功能，可以叫做decoder，同时，目标检测不再需要faster-rcnn做proposals，不再需要anchor，不再需要NMS，就是这么神，接下来看看是怎么超神的。
 
-![image-20220303174706750](../document/images/image-20220303174706750.png)
+​		DETR前面的encoder部分与上面ViT提到的基本一致，将图像进行分块之后经过CNN得到一组图像特征，之后通过transformer 进行encoder，对于decoder做法是首先规定预测100个坐标框，其中包含需要检测的物体，如果检测的物体小于100个，则其余的目标框为非物体。做法的基本思想是初始化100个初始向量，之后让每个初始向量融合信息并预测物体，这里物体的过滤出来，其他的过滤掉就ok了。如下图所示：
 
-##### 四、TransformerFusion
+![image-20220210164813408](../document/images/image-20220210164813408.png)
 
-**1、摘要与序论**
+​		encoder的目的就是将固定的patches得到对应的特征向量，下面具体介绍一下decoder的做法，这里面的核心是object queries，即生成的初始化的目标query。那么encoder提供的主要是k，v的部分。这里的每个q与k和v进行融合得到该query是否是一个目标。
 
-​		论文《TransformerFusion: Monocular RGB Scene Reconstruction using Transformers，2021》引入的TransformerFusion是基于transformer的3D场景重建方法。模型输入是一段图像视频，transformer网络处理这些视频帧并融合观测特征到一个场景的空间栅格特征，之后这个栅格特征被解码为隐式的3D场景表示。这个方法的关键是transformer的结构可以通过场景重构任务监督学习使得网络关注场景中最为重要的图像帧。特征以从粗到细的方式进行融合，通知只有下需要的地方才记忆细等级的特征，使得网络需要较低的内存存储并以交互的速率进行融合。这个特征栅格之后会通过基于MLP的方法进行占据表面的预测进而被解码为高分辨率的场景结构。我们方法可以获得高精度表面重构，高于最好的多视图立体深度估计的方法、全卷积3D重构方法以及基于LSTM、GRU的递归网络进行视频序列融合的方法。
+![image-20220210165549531](../document/images/image-20220210165549531.png)			
 
-​		单目3D重构用于准确重构目标或环境的3D几何信息，这个主要用于机器人、自动计时、基于场景建模和编辑的增强现实和虚拟现实。此外，几何重构还是3D场景理解的基础，支持3D目标检测、语义分割和实例分割**[34, 35, 36, 29, 7, 43, 15, 16]**.。
+​		具体细节如下：
 
-​		目前，在多视角深度估计取得了显著进步，主要通过成对图像进行特征提取得到[42, 17, 19, 38, 13]，但这种平均特征的方式使得没有重点关注关键的视频帧，使得场景重建精度存在挑战。
+​		(1) 100个object queries每个都采用0+位置编码的方式进行初始化；
 
-​		本文核心就是使用transformer结构学习视频帧中的融合特征，期间重点关注具有丰富信息的关键帧来重构场景的局部区域。一个由粗到精的级联特征融合结构使得该框架可以以交互的帧率进行实时在线重建。
+​		(2) 首先object queries先进行多头自注意力学习，这里是多个object queries之间先进行信息的融合，形象理解是通过自注意力学习协调内部不同queries需要负责的任务；
 
-**2、相关工作**
+​		(3) 对于image的特征进行encoder的过程中也是通过多头自注意力进行特征信息的融合；
 
-​		多视图深度估计：COLMAP通过区块匹配(patch matching)方法的好很高的精度，是当前非常受欢迎的多视图几何的方法，但在缺少纹理信息的区域很难构建稠密的信息。目前基于深度学习的方法可以进一步解决上述问题，一些将多视图构建到一个cost volume中，也有一些通过概率过滤、高斯处理或LSTM层进行先前深度估计信息的反向传播，但这些方法智能构建单视角深度图，需要进一步融合才能能到整个场景的3D几何。
+​		(4) 对于object queries最终提供的是q，对于image特征最终提供的是k和v，在融合信息的时候采用object queries的q和image的k和v进行融合，这里融合称为多头交叉注意学习，即Multi-Head Attention或 Multi-Head Cross Attention机制。随后经过多层迭代后得到的特征进行目标类别和box的预测，迭代的过程都是通过query和image特征中的k和v进行融合的。其中多一个FFN是全连接层。
 
-​		以单目RGB输入进行3D重构：多视图深度估计方法可以与深度融合方法 方法组合来获取场景重构的体积。MonoFusion[33]是第一个从PatchMatch方法变体过来的深度估计方法。然而，这种深度估计的融合噪声产生的伪影(artifacts)导致最近的方法都是预测3D的表面，而不是进行每帧的深度估计。一个通过两帧RGB图像来预测3D表面占据的方法是SurfaceNet，它采用3D卷积网络将体积平均colors转到了3D表面占据。Atlas将这个方法扩展到多视图，然而依然利用学习的特征来替代colors(colors没有理解具体含义？)。最近的NeuralRecon剔除一个实时3D重构框架，添加了GRU单元来从不同局部帧窗口中融合重构。我们的方法依然是融合RGB图像中学习的特征，并且是以一种在线的方式，同时我们基于transforer的多视图特征融合能够只依赖具有重要信息的帧来重构，并且获得更准确的3D重构。
+​		(5)对于传统的transformer用于语言处理时是具有Mask机制的，即在训练过程中需要屏蔽后面内容的影响，但是在图像感知中是不需要的。
 
-​		Transformers在计算机视觉中的应用：Transformer在计算机视觉中的应用可以参看[22],该方法在计算机视觉中已经成功应用在目标价检测、视频分类、图像分类、图像生成以及人体重构。在本文中，我们提出基于transformer特征融合的方法用于3D场景重构。只要给一段场景的观察RGB序列，我们方法可以学习重要的特征信息来预测一个稠密的占据空间。
+​		(6) 对于最终输出100个预测框，加入实际图像中只有2个真实目标，则如何计算loss。这里使用的是匈牙利匹配算法实现，按loss最小的组合，剩下的98个都是背景。
 
-**3、使用Transformers的端到端3D重构**
+​		(7) 在decoder的交叉注意迭代过程中，每一层都可以进行loss计算。
 
-​		给定义一段RGB图像序列，每个图像需要有对应的摄像头内参和外部poses，我们的方法通过预测每个3D空间点的占据值o[0,1]来重构了几何场景。下图显示了整个框架架构。首先每个图像通过2D卷积进行编码，得到粗和细的图像特征，之后我们构建一个3D特征栅格，并按照粗的3D栅格大小为30cm，细的为10cm，通过这些粗和细的栅格点作为query，从N张图片中请求相应的2D特征并用于融合粗和细的3D特征，这一过程通过transformer网络实现的。
+##### 概念：多头自注意力(Multi-head self attention)和多头交叉注意力(Multi-head cross attention)
 
-![image-20220306132621473](../document/images/image-20220306132621473.png)
+​		对于这两个概念的理解可以简单认为自注意力机制中的q,k,v的输入是来自于同一个数据源，而交叉注意力机制的q是与k和v来自于不同的数据源。同时，注意力模块的输出是与q相同的，所以自注意力可以认为是原始数据特征的提取，而交叉注意力是交叉数据特征的生成。
 
-​		具体方式如下：
+![image-20220210175405269](../document/images/image-20220210175405269.png)
 
-![image-20220306165434804](../document/images/image-20220306165434804.png)
+​		根据transformer提供的全局attention机制可以看到该框架可以对重合的物体进行很好的注意力关注。
 
-![image-20220306165450111](../document/images/image-20220306165450111.png)
+![image-20220210174134390](../document/images/image-20220210174134390.png)
 
-![image-20220306165513095](../document/images/image-20220306165513095.png)
+#### 三、Transformer的作用
 
-![image-20220306165531864](../document/images/image-20220306165531864.png)
+##### 1、将Transformer应用在backbone
 
-​		这里需要注意的是我们存储了中间第一层transformer注意力权重wc和wf，这样可以高效的进行视角选择，这会在后面进行详细介绍。
+​		前面介绍了自注意力机制与交叉注意力机制的区别，实际上交叉注意力机制就是最原始提到的注意力机制，甚至它的提出还在Transformer之前。最早提到注意力机制的是发表在2015年ICLR的文章《[Neural Machine Translation by Jointly Learning to Align and Translate](https://arxiv.org/abs/1409.0473)》，而在《[Attention is All you Need](https://arxiv.org/abs/1706.03762)》文章中主要是将双向RNN编码替换成了自注意力模块。所以很多说法中注意力机制是指的交叉注意力机制。
 
-​		为了更进一步的改善3D空间特征，这里在粗和精层次使用了3D卷积网络Cc和Cf。
+​		在很多关于CV的应用中是利用transformer的自注意力机制，例如在ViT《[An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale](https://arxiv.org/abs/2010.11929), ICLR 2021》和Swin Transformer《[Hierarchical Vision Transformer using Shifted Windows](https://towardsdatascience.com/arxiv.org/abs/2103.14030)》中，通过自注意力机制实际增强了提取特征backbone的能力，然而在考虑Transformer建构对训练资源、部署资源的需求，实际上并没有比CNN更具竞争力。在实际产品中使用Transformer用于特征提取主要能说明有钱(目前看来)。
 
-​		最后，为了得到三维场景中每个点的几何占据，将粗和精特征通过3个方向的差值和一个多层感知模块MLP将特征转到占据属性。
+##### 2、将Transformer应用在视角转换
 
-​		获取表面占据属性是由卷积占据网络[32]和IFNet[5]产生的灵感，根据占据区域我们可以通过Marching cubes[27]的方法得到物体表面mesh。我们通过监督预测表面占据来训练该方法，损失函数如下：
+​		在另一方面，交叉注意力机制实际上是有很好的应用前景。前面介绍的DETR《[End-to-End Object Detection with Transformers](https://arxiv.org/abs/2005.12872), ECCV 2020》是通过采用固定数量的object queries来学习目标检测结果，仿佛是提供预先的空白模板，之后通过交叉注意力机制来填充这些空白的模板。		
 
-![image-20220306170924653](../document/images/image-20220306170924653.png)
+​		那么根据这个启发，交叉注意力机制用于视图转换也是可以的，如下将object queries替换成BEV queries，同时对于特征提取可以采用不同的backbone。
 
-​		这里Lc和Lf指的是在表面附近位置占据mask预测的BCE损失，Lo只的是表面占据预测的BCE损失。
+![image-20220211144806671](../document/images/image-20220211144806671.png)
 
-**(1) 通过Transformers学习时间特征融合**
+​		采用类似方式进行图像视图转换的论文解析如下：
 
-​		方法中的Tansformer模型T是独立用于空间中的每个点的，对于每个点p，transformer网络获取一些列的2D特征作为输入，这些特征是反投影到图像位置获取图像特征的差值得到的，而反投影图像位置只共通过透射变化来计算的。这里假定摄像头的内参和外参是已知的。
+(1)  PYVA
 
-![image-20220306172315873](../document/images/image-20220306172315873.png)
+​		论文《[Projecting Your View Attentively: Monocular Road Scene Layout Estimation via Cross-view Transformation](https://openaccess.thecvf.com/content/CVPR2021/papers/Yang_Projecting_Your_View_Attentively_Monocular_Road_Scene_Layout_Estimation_via_CVPR_2021_paper.pdf), CVPR 2021》是第一个明确提出交叉注意力机制可以用于图像视图转到到BEV空间。该任务主要用于在BEV特征上的车道轮廓与车辆语义分割检测。
 
-​		为了让transformer知道像素特征的有效性，如投影点可能在图像外部，我们提供像素有效性标识vi(0,1)作为输入。除了这些2D特征，这里还关联了投影深度以及视角线，如下式所示，这里ci表示第i帧图像的摄像头中心。这些输入特征通过一个FCN层被转换为embedding向量，之后被传递给transformer网络来预测融合特征。这里可以看到，w是指初始注意力层的注意力值，这将用于视角选择来加速融合。
+![image-20220211160217262](../document/images/image-20220211160217262.png)
 
-![image-20220306173041189](../document/images/image-20220306173041189.png)
+​		PYVA首先使用MLP来将图像空间特征X转换到BEV空间X'，采用另一个MLP将X'反投回图像空间X''，这样使用X和X''之间的循环一致性损失来使得X'尽可能保留相关的信息。
 
-![image-20220306173104373](../document/images/image-20220306173104373.png)
+​		PYVA使用transformer的交叉注意力模型利用BEV特征X'生成query以及输入X特征生成k和v。这里没有对X'特征为BEV空间进行明确的监督学习，所以是通过下游在BEV空间中的任务loss来隐式监督学习的。
 
-![image-20220306173236423](../document/images/image-20220306173236423.png)
+(2) NEAT
 
-​		![image-20220306173547237](../document/images/image-20220306173547237.png)
+​		论文《[Neural Attention Fields for End-to-End Autonomous Driving](https://arxiv.org/abs/2109.04456), ICCV 2021》中的创新点是对于每一个给定的位置(x,y)，利用MLP结构以图像特征和位置(x,y)作为输入计算出权重图(相当于q*v的到权重)，之后权重图乘以原始的图像特征得到给定位置(x,y)在目标BEV的特征。那么如果通过这种方式对BEV视角下的所有栅格位置进行跌打，可以得到BEV下的特征图。
 
-**Transformer结构**	
+![image-20220211161527028](../document/images/image-20220211161527028.png)
 
-​		我们依据[12]进行了transformer架构的设计，包含了8个前向模块和注意力层，使用4层注意力头并且特征维度为256.前馈层独立处理输入。在初始注意力层对所有时间序列输入处理基础上，模型返回融合特征phi和注意力权重w，这个w用于后面选择哪个视角将会在一段长的输入视图中被保持。
+​		对于NEAT模块与交叉注意力机制比较相似，主要的不同是计算q与k的权重时采用了MLP。对于采用MLP与采用交叉注意力方式不同点是MLP的方式可以保持交叉注意力机制的数据依赖特性，但是却没有置换不变性。
 
-**(2)空间特征细化**
+​		总结来讲就是NEAT使用MLP来将图像转到BEV空间。
 
-​		当transformer网络融合2D在时间域上的观察，我们通过应用一个3D CNN来对空间精炼融合特征，从而显示的进行空间推理。首先粗的特征通过3D CNN来进行细化，之后这些特征会被上采样到细的分辨率，之后与细的进行连接并进行3D CNN，得到最后细化特征。最后，粗的特征和细的特征都会用于表面占据预测。
+(3) STSU
 
-​		**由粗到细表面过滤：**
+​		论文《[Structured Bird’s-Eye-View Traffic Scene Understanding from Onboard Images](https://arxiv.org/abs/2110.01997), ICCV 2021》类似DETR使用离散的queries用于目标检测，同时STSU不只是检测动态目标，还有静态道路结构。这里采用了两组queries集合，一组用于道路中心线，一组用于目标。
 
-​		进一步精细的特征被用于预测接近表面位置的占据mask，这样可以过滤出空的稀疏的volume的区域，这样高分辨率计算较为复杂只在表面区域执行。为了得到这个结果，额外的3D CNN层Mc和Mf层被用于细化特征，输出每个栅格点接近表面的mask mc和mf。
+​		论文LSTR《[End-to-end Lane Shape Prediction with Transformers](https://arxiv.org/abs/2011.04233)*, WACV 2011*》对于道路预测也使用了Transformer，还有一个类似论文HDMapNet《[An Online HD Map Construction and Evaluation Framework](https://arxiv.org/abs/2107.06307)*, CVPR 2021 workshop*》，它在图像空间进行道路结构预测，但这篇论文没有使用Transformer。
 
-![image-20220306183439617](../document/images/image-20220306183439617.png)
+![image-20220211163442124](../document/images/image-20220211163442124.png)
 
-​		只有空间区域中mc和mf大于0.5才会被进一步处理计算最后的表面重构，而其他区域本定义为空区域。这一改善提升了重构的整体性能，因为这里会使表面预测聚焦在接近表面的区域，同时也极大提升了速度。
+(4) DETR3D
 
-​		监督表面mask mc和mf使用场景重构真值得到的mgtc和mgtf，指示栅格点附近在半径vc和vf之内的为需要的表面点。同样BCEloss被使用。
+​		DETR3D论文《[3D Object Detection from Multi-view Images via 3D-to-2D Queries](https://arxiv.org/abs/2110.06922), CoRL 2021》类似DETR使用离散queries进行目标检测。这些queries是直接在BEV空间。
 
-**(3) 表面占据预测**
+![image-20220211174048817](../document/images/image-20220211174048817.png)
 
-​		最后表面重构预测通过解码栅格的占据值o(0,1)，当大于0.5表好似占据点。这里是通过MLP结构得到的。
+​		在BEV进行感知相对于mono3D的一个优势是在摄像头视角重叠区域，单目对于截断的物体只能通过预测的方式进行目标检测，而DETR3D则能够得到比较好的效果。这个在tesla AI day中也进行了说明。
 
-**(4) 在线场景重构的视频帧选择**
+​		同时，DETR3D使用多个tricks进行性能提升。一个是通过迭代精细化object queries。本质上，预测bbox在BEV的中心再使用相机内外参反投影回图像，对多相机图像特征进行抽样和集合来优化queries。这一操作被用于多次重复来提升性能。第二个trick是用提前预训练的mono3D模型作为backbone，初始化对于基于Transformer的BEV感知网络比较重要。
 
-​		对于三维场景重构我们目的是考虑所有的N张图像，然而这对长的视频和大尺度场景将非常耗计算量，这无法应用在线场景重构。本文是对每一帧视频进行增量处理，对于每一个3D点只是保留K=16个短剑测量。
+(5) Tesla方法
 
-​		在训练阶段，我们对训练的区域内随机使用Kt个图像。在测试阶段，我们利用初始transformer层的权重wc和wf来决定哪个视角被保留下来。特别的，对于一张新的RGB图像，抽取它的2D特征，之后对图像视锥中的栅格点进行特征融合，这反馈了融合特征和当前所有输入测量的注意力权重，当测量大于K时，在加入最新的测量帧之前会丢掉一个注意力权重最低的。这保证最小数量的输入测量，相当大的增加了融合处理时间。更重要的是，通过由粗到精的过滤，我们可以加入融合。最终我们方法在7FPS。
+​		在2021年的tesla AI Day上，tesla展现其内部的网络结构，其中最主要的模块就是图像到BEV的转换以及多摄像头融合，这里的核心就是交叉注意力机制。
 
-**(5) 训练策略**
+![image-20220211175719205](../document/images/image-20220211175719205.png)
 
-​		使用了公寓室内RGB-D 的ScanNet数据库。
+​		通过初始化一个你希望输出大小的空间的光栅并使用sine和cosine来编码输出空间的位置，之后用MLP进行encoded成一组query向量，之后所有的图像会输出他们自己的keys和valuse，之而后这些queries、keys、values将反馈到交叉注意力模块中。
 
-**4、试验性能**
+​		这里比较关键的是视图转换中query在BEV空间的生成，它是通过BEV空间中以光栅化方式生成的，类似DETR这种空的模板通过连接了位置编码。同时会有一个上下文信息连接在位置编码上。这里猜测是将图像空间的信息经过稀疏话后平铺到BEV的grid上。
 
-![image-20220306200205263](../document/images/image-20220306200205263.png)
+![image-20220211182811158](../document/images/image-20220211182811158.png)
 
-参考文献：
+#### References
 
-[13]Deepvideomvs: Multi-view stereo on video with recurrent spatio-temporal fusion,2020
+https://towardsdatascience.com/monocular-bev-perception-with-transformers-in-autonomous-driving-c41e4a893944
 
-[22]Transformers in vision: A survey,2021
+https://www.bilibili.com/video/BV1M44y1q7oq?from=search&seid=10327593834426555334&spm_id_from=333.337.0.0
 
-[32]Convolutional occupancy networks,2020, ECCV
 
-[5] Implicit functions in feature space for 3d shape reconstruction and completion,2020,CVPR
-
-[27]Marching cubes: A high resolution 3d surface construction algorithm, 1987.	
-
-[12]An image is worth 16x16 words: Transformers for image recognition at scale, 2020.
-
-
-
-[29]Rfd-net: Point scene understanding by semantic instance reconstruction,2020.
-
-[7]3dmv: Joint 3d-multi-view prediction for 3d semantic scene segmentation,2018.
-
-[15] 3d-sis: 3d semantic instance segmentation of rgb-d scans, 2019.
-
-[16]Revealnet: Seeing behind objects in rgb-d scans, 2020.
-
-Multi-view Monocular Depth and Uncertainty Prediction with Deep SfM in Dynamic Environments
 
 ##### 五、Transformers in Vision：A Survey
 
-​		transformer在自然语言中的吃惊结果激发了视觉社区来研究该技术来解决计算机视觉方面的问题。与长短记忆网络相比，Transformers的显著优点是支持对输入序列元素长期依赖进行建模并支持并行化处理。与卷积网络不同，transformers的设计需要最小的引导偏置并且天然适应集函数。更多的，transformers设计的相同处理模块用于运行处理多模态(图像、视频、文字、语言)数据并且证明对于大容量网络和大数据具有优秀的扩展性。
+​		transformer在自然语言中的吃惊结果激发了视觉社区来研究该技术来解决计算机视觉方面的问题。与长短记忆网络相比，Transformers的显著优点是支持对输入序列元素长期依赖进行建模并支持并行化处理。与卷积网络不同，transformers的设计需要最小的引导偏置并且天然适应集函数。更多的，transformers设计的相同处理模块用于运行处理多模态(图像、视频、文字、语言)数据并且证明对于大容量网络和大数据具有优秀的扩展性。这些优势为基于transformer网络的视觉任务带来令人兴奋进步。本文主要提供了transformer在计算机视觉学科中的全面理解。本文首先介绍transformer背后成功的基本概念，如自我注意、大规模预训练和双向特征编码。我们之后会扩展到transformer在视觉中的应用(包括图像分类、目标检测、动作识别、语义分割)、模型生成、多模态任务(包括视觉问题回答，视觉推理，视觉基础)、视频处理(包括动作识别、视频预测)、低阶视觉(low-level vision)(图像超分辨率、图像增强、)、3D分析(点云分类和分割)。我们在结构设计和试验结果方面比较了流行技术的各自的优劣性。最后，我们对一些开放的研究方向和未来可能的工作进行了分析，我们希望这些工作可以激发研究的兴趣来解决transformer在计算机视觉方面当前的挑战。
+
+​		transformer模型最近证明在广泛的语言任务中具有典范的性能，如文本分类、机器翻译及问题回到。在这些模型中，最流行的
 
 
 
-兼职构建前中后，需要概念化，主动招人； 
 
-以终为始；
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
